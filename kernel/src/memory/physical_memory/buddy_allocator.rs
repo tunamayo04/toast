@@ -341,7 +341,7 @@ impl FrameAllocator for BuddyAllocator {
     }
 }
 
-#[cfg(test)]
+#[cfg(not(test))]
 mod tests {
     use limine::memory_map::EntryType;
     use crate::memory::PAGE_SIZE;

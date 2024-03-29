@@ -8,6 +8,7 @@ use self::virtual_memory::paging::ActivePageTable;
 use self::virtual_memory::paging::entry::EntryFlags;
 use self::virtual_memory::heap_allocator::init_heap;
 use crate::memory::physical_memory::{Frame, FrameAllocator};
+use crate::memory::physical_memory::static_linear_allocator::StaticLinearAllocator;
 use crate::memory::virtual_memory::heap_allocator::HEAP_SIZE;
 use crate::memory::virtual_memory::paging::Page;
 use crate::memory::virtual_memory::VirtualMemoryManager;
@@ -22,7 +23,7 @@ pub const PAGE_SIZE: usize = 4096;
 
 pub static INSTANCE: OnceCell<Mutex<MemoryManager>> = OnceCell::uninit();
 pub struct MemoryManager {
-    pub frame_allocator: BuddyAllocator,
+    pub frame_allocator: StaticLinearAllocator,
     pub active_page_table: ActivePageTable,
     pub virtual_memory_manager: VirtualMemoryManager,
 }
@@ -31,21 +32,17 @@ impl MemoryManager {
     pub fn init(memory_map: &'static MemoryMapResponse) -> Result<(), &'static str>{
         serial_println!("mm: init...");
 
-        let mut linear_allocator = LinearFrameAllocator::new(memory_map);
+        let mut frame_allocator = StaticLinearAllocator::new(memory_map.entries()).expect("error");
 
         //let mut active_page_table = setup_page_tables(memory_map, &mut linear_allocator);
         let mut active_page_table = unsafe { ActivePageTable::new() };
-        init_heap(&mut linear_allocator, &mut active_page_table);
-
-        // Switch to the buddy allocator
-        let mut buddy_allocator = BuddyAllocator::new(memory_map);
-        buddy_allocator.set_allocated_frames(linear_allocator.allocated_frames())?;
+        init_heap(&mut frame_allocator, &mut active_page_table);
 
         let mut vmm = VirtualMemoryManager::new();
         vmm.allocate_pages(HEAP_SIZE / PAGE_SIZE)?;
 
         let memory_manager = Self {
-            frame_allocator: buddy_allocator,
+            frame_allocator,
             active_page_table,
             virtual_memory_manager: vmm,
         };
@@ -65,7 +62,8 @@ impl MemoryManager {
     pub fn get_allocated_memory_amount() -> (usize, usize) {
         let memory_manager = MemoryManager::instance().lock();
 
-        (memory_manager.frame_allocator.get_allocated_amount(), memory_manager.virtual_memory_manager.get_allocated_amount())
+        // (memory_manager.frame_allocator.get_allocated_amount(), memory_manager.virtual_memory_manager.get_allocated_amount())
+        (0, 0)
     }
 
     pub fn vmm_alloc(size: usize, flags: EntryFlags) -> Option<VirtualAddress> {
@@ -106,7 +104,8 @@ impl MemoryManager {
         let page_count = size.div_ceil(PAGE_SIZE);
         let order = (0..=10).find(|&x| 2usize.pow(x as u32) >= page_count).expect("pmm_alloc: could not allocate memory");
 
-        let alloc = memory_manager.frame_allocator.allocate_frames(order).expect("pmm: could not allocate memory");
+        // let alloc = memory_manager.frame_allocator.allocate_frames(order).expect("pmm: could not allocate memory");
+        let alloc = memory_manager.frame_allocator.allocate_frame().expect("pmm: could not allocate memory").start_address();
         Some(alloc)
     }
 
@@ -117,7 +116,7 @@ impl MemoryManager {
         let page_count = size.div_ceil(PAGE_SIZE);
         let order = (0..=10).find(|&x| 2usize.pow(x as u32) >= page_count).expect("pmm_alloc: could not allocate memory");
 
-        let alloc_start = memory_manager.frame_allocator.allocate_frames(order).expect("pmm: could not identity map");
+        let alloc_start = memory_manager.frame_allocator.allocate_frame().expect("pmm: could not identity map").start_address();
         let alloc_size = 2usize.pow(order as u32);
 
         // Identity map the pages
@@ -141,7 +140,8 @@ impl MemoryManager {
         let page_count = size.div_ceil(PAGE_SIZE);
         let order = (0..=10).find(|&x| 2usize.pow(x as u32) >= page_count).expect("pmm: could not free memory");
 
-        memory_manager.frame_allocator.deallocate_frames(address, order).expect("pmm: could not free memory");
+        // memory_manager.frame_allocator.deallocate_frames(address, order).expect("pmm: could not free memory");
+        memory_manager.frame_allocator.deallocate_frame(Frame::containing_address(address)).expect("pmm: could not free memory");
 
         let freed_size = 2usize.pow(order as u32);
 
