@@ -13,7 +13,7 @@ macro_rules! test_bit {
 macro_rules! set_bit {
     ($num:expr, $n:expr) => {{
         let mask = 1 << $n;
-        $num | mask
+        $num | mask;
     }};
 }
 

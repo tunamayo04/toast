@@ -4,7 +4,7 @@ use limine::memory_map;
 use limine::memory_map::EntryType;
 use linked_list_allocator::align_up;
 use rlibc::memset;
-use crate::{HHDM_OFFSET, test_bit};
+use crate::{HHDM_OFFSET, set_bit, test_bit};
 use crate::memory::{PAGE_SIZE, PhysicalAddress};
 use crate::memory::physical_memory::{Frame, FrameAllocator};
 
@@ -47,6 +47,10 @@ impl PmmModule {
             let alloc = self.start_address + last_free * PAGE_SIZE;
             let bit_base = (alloc - self.start_address) / PAGE_SIZE;
 
+            let byte_index = bit_base / 8;
+            let bit_index = bit_base % 8;
+            set_bit!((unsafe { *self.bitmap.add(byte_index) }), bit_index);
+
             for i in bit_base..self.bitmap_entry_count {
                 let byte_index = i / 8;
                 let bit_index = i % 8;
@@ -78,9 +82,10 @@ impl StaticLinearAllocator {
         // Find an available region large enough to fit everything
         let containing_entry = memory_regions
             .iter()
-            .find(|entry| entry.entry_type == EntryType::USABLE && entry.length >= buffer_size as u64)
+            .enumerate()
+            .find(|entry| entry.1.entry_type == EntryType::USABLE && entry.1.length >= buffer_size as u64)
             .ok_or("pmm: could not find a suitable memory region to hold the pmm")?;
-        let buffer_start = align_up(containing_entry.base as usize + *HHDM_OFFSET, PAGE_SIZE);
+        let buffer_start = align_up(containing_entry.1.base as usize + *HHDM_OFFSET, PAGE_SIZE);
         let mut meta_buffer = buffer_start as *mut u8;
 
         // Create modules for all regions
@@ -115,9 +120,29 @@ impl StaticLinearAllocator {
             }
         });
 
-        Ok(Self {
+        // Allocate the memory region used by the allocator
+        let allocator = Self {
             root_module: unsafe { &mut *root_module.unwrap() },
-        })
+        };
+
+        let mut containing_module: &PmmModule = allocator.root_module;
+        for _ in 0..=containing_entry.0 {
+            containing_module = unsafe { &mut *containing_module.next.unwrap() };
+        }
+
+        let frame_count = buffer_size.div_ceil(PAGE_SIZE);
+        let byte_count = frame_count / 8;
+        let bit_count = frame_count % 8;
+
+        unsafe {
+            for i in 0..byte_count {
+                ptr::write(containing_module.bitmap.add(i), 0xFF);
+            }
+
+            ptr::write(containing_module.bitmap.add(byte_count), (1 << bit_count) - 1);
+        }
+
+        Ok(allocator)
     }
 }
 impl FrameAllocator for StaticLinearAllocator {
