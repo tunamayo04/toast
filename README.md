@@ -1,4 +1,6 @@
-![alt tet](resources/logo.png)
+<p align="center">
+  <img src="resources/logo.png" width="500px"/>
+</p>
 
 # Toast
 A small hobby operating system written in Rust
