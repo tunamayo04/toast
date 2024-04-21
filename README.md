@@ -1,3 +1,5 @@
+![alt tet](resources/logo.png)
+
 # Toast
 A small hobby operating system written in Rust
 
