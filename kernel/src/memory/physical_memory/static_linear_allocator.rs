@@ -1,13 +1,10 @@
 use core::mem::size_of;
 use core::ptr;
-use bit::BitIndex;
-use bitfield::Bit;
 use limine::memory_map;
 use limine::memory_map::EntryType;
 use linked_list_allocator::align_up;
 use rlibc::memset;
-use bit;
-use crate::{HHDM_OFFSET, set_bit, test_bit};
+use crate::{HHDM_OFFSET, test_bit};
 use crate::memory::{PAGE_SIZE, PhysicalAddress};
 use crate::memory::physical_memory::{Frame, FrameAllocator};
 
@@ -50,14 +47,10 @@ impl PmmModule {
             let alloc = self.start_address + last_free * PAGE_SIZE;
             let bit_base = (alloc - self.start_address) / PAGE_SIZE;
 
-            let byte_index = bit_base / 8;
-            let bit_index =  7 - (bit_base % 8);
-            unsafe { *self.bitmap.add(byte_index) }.set_bit(bit_index, true);
-
             for i in bit_base..self.bitmap_entry_count {
                 let byte_index = i / 8;
-                let bit_index = 7 - (i % 8);
-                if Bit::bit(&unsafe { *self.bitmap.add(byte_index) }, bit_index) {
+                let bit_index = i % 8;
+                if !test_bit!(unsafe { *self.bitmap.add(byte_index) }, bit_index) {
                     self.last_free = Some(bit_base + i);
                     break;
                 }
@@ -82,80 +75,49 @@ impl StaticLinearAllocator {
             .fold(0, |acc, entry|
                 acc + size_of::<PmmModule>() * 2 + entry.length.div_ceil(PAGE_SIZE as u64).div_ceil(8) as usize);
 
-        serial_println!("pmm: allocator requires {} bytes", buffer_size);
-
         // Find an available region large enough to fit everything
         let containing_entry = memory_regions
             .iter()
-            .enumerate()
-            .find(|entry| entry.1.entry_type == EntryType::USABLE && entry.1.length >= buffer_size as u64)
+            .find(|entry| entry.entry_type == EntryType::USABLE && entry.length >= buffer_size as u64)
             .ok_or("pmm: could not find a suitable memory region to hold the pmm")?;
-        let buffer_start = align_up(containing_entry.1.base as usize + *HHDM_OFFSET, PAGE_SIZE);
+        let buffer_start = align_up(containing_entry.base as usize + *HHDM_OFFSET, PAGE_SIZE);
         let mut meta_buffer = buffer_start as *mut u8;
-
-        serial_println!("pmm: memory region {} of size {} bytes wll contain the pmm", containing_entry.0, containing_entry.1.length);
 
         // Create modules for all regions
         let mut root_module: Option<*mut PmmModule> = None;
         memory_regions.iter().filter(|entry| entry.entry_type == EntryType::USABLE).for_each(|entry| {
-            serial_println!("pmm: creating module for region at 0x{:X}", entry.base);
-            unsafe {
-                let module_location = meta_buffer as *mut PmmModule;
-                let bitmap_location = meta_buffer.add(size_of::<PmmModule>() * 2);
+            match root_module {
+                None => {
+                    if root_module.is_none() {
+                        unsafe {
+                            let module = PmmModule::init(entry.base as PhysicalAddress, entry.length as usize, meta_buffer);
+                            ptr::write(meta_buffer as *mut PmmModule, module);
+                            root_module = Some(&mut *(meta_buffer as *mut PmmModule));
 
-                // Set the root module or the last created module's next pointer
-                match root_module {
-                    None => {
-                        let module = &mut *module_location;
-                        root_module = Some(module);
-                    },
-                    Some(mut root) => {
-                        let mut module = &mut *root;
-                        while let Some(next) = module.next {
-                            module = &mut *next;
+                            meta_buffer = meta_buffer.add(size_of::<PmmModule>() * 2);
                         }
-
-                        module.next = Some(module_location);
                     }
-                };
+                },
+                Some(mut root) => {
+                    let mut node = unsafe { &mut *root };
+                    while let Some(next) = node.next {
+                       node = unsafe { &mut * next };
+                    }
 
-                let module = PmmModule::init(entry.base as PhysicalAddress, entry.length as usize, bitmap_location);
-                let bitmap_size = module.bitmap_size;
+                    unsafe {
+                        let module = PmmModule::init(entry.base as PhysicalAddress, entry.length as usize, meta_buffer);
+                        ptr::write(meta_buffer as *mut PmmModule, module);
+                        node.next = Some(meta_buffer as *mut PmmModule);
 
-                ptr::write(module_location, module);
-
-                meta_buffer = meta_buffer.add(size_of::<PmmModule>() * 2 + bitmap_size);
+                        meta_buffer = meta_buffer.add(size_of::<PmmModule>() * 2);
+                    }
+                }
             }
         });
 
-        let mut allocator = Self {
+        Ok(Self {
             root_module: unsafe { &mut *root_module.unwrap() },
-        };
-
-        allocator.allocate_self_memory(containing_entry.0, buffer_size);
-
-        Ok(allocator)
-    }
-
-    /// Allocate the memory used by the allocator itself such that it is not reallocated anywhere else
-    fn allocate_self_memory(&mut self, containing_region_number: usize, buffer_size: usize) {
-        let mut containing_module: &PmmModule = self.root_module;
-        for _ in 0..containing_region_number {
-            containing_module = unsafe { &mut *containing_module.next.unwrap() };
-        }
-
-        let frame_count = buffer_size.div_ceil(PAGE_SIZE);
-        let byte_count = frame_count / 8;
-        let bit_count = frame_count % 8;
-
-        unsafe {
-            for i in 0..byte_count {
-                ptr::write(containing_module.bitmap.add(i), 0xFF);
-            }
-
-            ptr::write(containing_module.bitmap.add(byte_count), (1 << bit_count) - 1);
-        }
-
+        })
     }
 }
 impl FrameAllocator for StaticLinearAllocator {
@@ -166,7 +128,6 @@ impl FrameAllocator for StaticLinearAllocator {
 
             // Return the frame if it was found
             if let Some(alloc) = alloc {
-                serial_println!("Allocating frame at address {:X}", alloc);
                 let frame = Frame::containing_address(alloc);
                 return Ok(frame);
             }
