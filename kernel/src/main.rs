@@ -113,9 +113,10 @@ unsafe fn init() {
     // init_acpi(boot_info); // TODO: This broke at some point, fix it
 
     let mut ahci_devices = drivers::pci::ahci::init();
-    let fs = mount_filesystem(&mut ahci_devices[0]);
 
     /*
+    let fs = mount_filesystem(&mut ahci_devices[0]);
+
     let file_name = "/files/file.txt";
     println!("Reading file {}...", file_name);
     let file = fs.get_file_contents(&mut ahci_devices[0], file_name).unwrap_or_else(|| panic!("could not find the file {}", file_name));

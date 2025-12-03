@@ -30,10 +30,11 @@ $(eval $(call DEFAULT_VAR,HOST_LIBS,$(DEFAULT_HOST_LIBS)))
 qemu_flags := -s \
 			  -cpu $(CPU_MODEL) \
 			  -cdrom $(IMAGE_NAME).iso \
-			  -drive id=disk,file=$(DISK_IMG).img,if=none \
 			  -device ahci,id=ahci \
-			  -device ide-hd,drive=disk,bus=ahci.0 \
 			  -serial stdio \
+			  #-drive id=disk,file=$(DISK_IMG).img,if=none \
+			  #-device ide-hd,drive=disk,bus=ahci.0
+
 
 .PHONY: all all-hdd run run-uefi run-hdd run-hdd-uefi kernel clean distclean
 

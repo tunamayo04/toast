@@ -162,7 +162,7 @@ pub extern "x86-interrupt" fn irq0_handler(stack_frame: InterruptStackFrame) {
     println!("{:#?}", stack_frame);
 }
 
-pub extern "x86-interrupt" fn irq1_handler() {
+pub extern "x86-interrupt" fn irq1_handler(stack_frame: InterruptStackFrame) {
     let scancode = PS2Keyboard::interrupt_read_byte();
     add_scancode(scancode);
 
