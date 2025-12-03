@@ -38,7 +38,7 @@ pub fn mem_info(args: &[&str]) {
             print!(">");
         },
         "physical" => {
-            // MemoryManager::instance().lock().frame_allocator.display_memory();
+            MemoryManager::instance().lock().frame_allocator.display_memory();
             print!(">");
         },/*
         "heap" => {

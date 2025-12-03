@@ -18,8 +18,6 @@ struct PmmModule {
 
     next: Option<*mut PmmModule>,
 }
-unsafe impl Send for PmmModule {}
-unsafe impl Sync for PmmModule {}
 impl PmmModule {
     fn init(start_address: PhysicalAddress, size: usize, memory_maps_start: *mut u8) -> Self {
         let frame_count = size.div_ceil(PAGE_SIZE);
@@ -31,7 +29,7 @@ impl PmmModule {
             bitmap_entry_count: frame_count,
             bitmap: memory_maps_start,
 
-            last_free: Some(0),
+            last_free: None,
             next: None,
         };
 
@@ -42,15 +40,14 @@ impl PmmModule {
         module
     }
 
-    fn allocate_frames(&mut self, count: usize) -> Option<PhysicalAddress> {
+    fn allocate_frame(&mut self) -> Option<PhysicalAddress> {
         if let Some(last_free) = self.last_free {
             let alloc = self.start_address + last_free * PAGE_SIZE;
             let bit_base = (alloc - self.start_address) / PAGE_SIZE;
 
             for i in bit_base..self.bitmap_entry_count {
-                let byte_index = i / 8;
-                let bit_index = i % 8;
-                if !test_bit!(unsafe { *self.bitmap.add(byte_index) }, bit_index) {
+                let byte_index = bit_base / 8;
+                if !test_bit!(unsafe { *self.bitmap.add(byte_index) }, bit_base as usize) {
                     self.last_free = Some(bit_base + i);
                     break;
                 }
@@ -63,11 +60,11 @@ impl PmmModule {
     }
 }
 
-pub struct StaticLinearAllocator {
+struct StaticLinearAllocator {
     root_module: &'static mut PmmModule,
 }
 impl StaticLinearAllocator {
-    pub fn new(memory_regions: &[&memory_map::Entry]) -> Result<Self, &'static str> {
+    pub fn init(memory_regions: &[&memory_map::Entry]) -> Result<Self, &'static str> {
         // Calculate how much memory will be necessary to accommodate the allocator
         let buffer_size = memory_regions
             .iter()
@@ -124,7 +121,7 @@ impl FrameAllocator for StaticLinearAllocator {
     fn allocate_frame(&mut self) -> Result<Frame, &'static str> {
         let mut module = unsafe { &mut *(self.root_module as *mut PmmModule) };
         loop {
-            let alloc = module.allocate_frames(1);
+            let alloc = module.allocate_frame();
 
             // Return the frame if it was found
             if let Some(alloc) = alloc {

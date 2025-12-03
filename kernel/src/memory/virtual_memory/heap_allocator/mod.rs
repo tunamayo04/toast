@@ -60,18 +60,10 @@ pub fn init_heap<A>(frame_allocator: &mut A, page_table: &mut ActivePageTable) w
 mod tests {
     use alloc::boxed::Box;
     use alloc::vec::Vec;
-    use crate::memory::MemoryManager;
     use crate::memory::virtual_memory::heap_allocator::HEAP_SIZE;
-    use crate::MEMORY_MAP_REQUEST;
-
-    fn init() {
-        MemoryManager::init(MEMORY_MAP_REQUEST.get_response().expect("could not retrieve the memory map")).expect("whoopsy daisy");
-    }
 
     #[test_case]
     fn box_allocation() {
-        init();
-
         let heap_value_1 = Box::new(41);
         let heap_value_2 = Box::new(13);
 
@@ -81,8 +73,6 @@ mod tests {
 
     #[test_case]
     fn large_vec() {
-        init();
-
         let n =1000;
         let mut vec = Vec::new();
         for i in 0..n {
